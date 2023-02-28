@@ -4,7 +4,8 @@
 #include <string>
 
 namespace FPNBits {
-    #define RNDBITS(__bits) ((__bits) + ((((__bits) % 8) > 0) ? (8 - ((__bits) % 8)) : 0))
+    #define DEADBITS(bits__) ((((bits__) % 8) > 0) ? (8 - ((bits__) % 8)) : 0)
+    #define RNDBITS(__bits) ((__bits) + DEADBITS(__bits))
     #define BITINBYTE(bit) (char(1) << (bit))
     #define CHKBITINBYTE(byte, bit) ((*(byte)) & BITINBYTE(bit))
     #define SETBITINBYTE(byte, bit) ((*(byte)) |= BITINBYTE(bit))
@@ -71,10 +72,10 @@ namespace FPNBits {
         }
     }
     
-    template<short BYTES>
-    struct ChrAry {
-        unsigned char m_data[BYTES];
-    };
+    // template<short BYTES>
+    // struct ChrAry {
+    //     unsigned char m_data[BYTES];
+    // };
     
     template<short _ExpBits, short _ManBits, bool _Signed>
     class StaticFloat {
@@ -82,12 +83,14 @@ namespace FPNBits {
         static constexpr short ExpBits = _ExpBits;
         static constexpr short ManBits = _ManBits;
         static constexpr bool Signed = _Signed;
+        static constexpr char MinSupportedManAccessBits = 4;
         static constexpr short MaxSupportedManAccessBits = (sizeof(__int128) * 8);
+        static constexpr char MinSupportedExpAccessBits = 4;
         static constexpr short MaxSupportedExpAccessBits = MaxSupportedManAccessBits - (Signed ? 1 : 0);
-        static constexpr char DeadBits = ((ExpBits + ManBits) % 8);
+        static constexpr char DeadBits = DEADBITS(ExpBits + ManBits);
         static constexpr bool HasDeadBits = (DeadBits > 0);
-        static constexpr bool ExpBitsInRange = ((ExpBits - (Signed ? 1 : 0)) <= MaxSupportedExpAccessBits);
-        static constexpr bool ManBitsInRange = (ManBits <= MaxSupportedManAccessBits);
+        static constexpr bool ExpBitsInRange = ((ExpBits >= MinSupportedExpAccessBits) && ((ExpBits - (Signed ? 1 : 0)) <= MaxSupportedExpAccessBits));
+        static constexpr bool ManBitsInRange = ((ManBits >= MinSupportedManAccessBits) && (ManBits <= MaxSupportedManAccessBits));
         static constexpr typename std::enable_if<ExpBitsInRange && ManBitsInRange, short>::type TotalBytes = (RNDBITS(ExpBits + ManBits) / 8);
         typedef StaticFloat<ExpBits, ManBits, !Signed> InvtType;
         
@@ -106,10 +109,10 @@ namespace FPNBits {
         template<typename T>
         void assign(T other) {
             if constexpr(Signed) if((m_IEEE754.Sign = (other < 0))) other = -other;
-            short bitIdx = (TotalBytes * 8) - 1;
+            short bitIdx = ((TotalBytes * 8) - 1);
 
             while(bitIdx > 0) {
-                if(other & (ManAccessType(1) << bitIdx)) {
+                if(other & (typename StaticFloat<ExpBits, ManBits, Signed>::ManAccessType(1) << bitIdx)) {
                     if(bitIdx >= ManBits) {
                         other >>= (bitIdx - ManBits);
                     } else {
@@ -120,8 +123,8 @@ namespace FPNBits {
                 bitIdx--;
             }
             
-            m_IEEE754.Exp = bitIdx + (StaticFloat<ExpBits, ManBits, true>::ExpMax >> 1);
-            m_IEEE754.Man = other & ~(ManAccessType(1) << ManBits);
+            m_IEEE754.Exp = (bitIdx + (StaticFloat<ExpBits, ManBits, Signed>::ExpMax >> 1));
+            m_IEEE754.Man = (other & ~(typename StaticFloat<ExpBits, ManBits, Signed>::ManAccessType(1) << ManBits));
         }
         
         public:
@@ -139,92 +142,198 @@ namespace FPNBits {
                         typename std::conditional<M32, unsigned int,
                             typename std::conditional<M64, unsigned long int, unsigned __int128>::type>::type>::type>::type>::type ManAccessType;
 
-        static constexpr typename StaticFloat<ExpBits, ManBits, Signed>::ExpAccessType ExpMax = ((((StaticFloat<ExpBits, ManBits, Signed>::ExpAccessType(1) << (ExpBits - (Signed ? 2 : 1))) - 1) << 1) + 1);
-        static constexpr typename StaticFloat<ExpBits, ManBits, Signed>::ManAccessType ManMax = ((((StaticFloat<ExpBits, ManBits, Signed>::ManAccessType(1) << (ManBits - 1)) - 1) << 1) + 1);
-        
-        static const StaticFloat<ExpBits, ManBits, true> PosInf {
-            .m_IEEE754.Sign = false,
-            .m_IEEE754.Exp = StaticFloat<ExpBits, ManBits, true>::ExpMax,
-            .m_IEEE754.Man = 0
-        };
-        
-        static const StaticFloat<ExpBits, ManBits, true> PosZero {
-            .m_IEEE754.Sign = false,
-            .m_IEEE754.Exp = 0,
-            .m_IEEE754.Man = 0
-        };
-        
-        static const StaticFloat<ExpBits, ManBits, true> PosOne {
-            .m_IEEE754.Sign = false,
-            .m_IEEE754.Exp = StaticFloat<ExpBits, ManBits, true>::ExpMax >> 1,
-            .m_IEEE754.Man = 0
-        };
+        static constexpr typename StaticFloat<ExpBits, ManBits, Signed>::ExpAccessType ExpMax = ((((typename StaticFloat<ExpBits, ManBits, Signed>::ExpAccessType(1) << (ExpBits - (Signed ? 2 : 1))) - 1) << 1) + 1);
+        static constexpr typename StaticFloat<ExpBits, ManBits, Signed>::ManAccessType ManMax = ((((typename StaticFloat<ExpBits, ManBits, Signed>::ManAccessType(1) << (ManBits - 1)) - 1) << 1) + 1);
+        private:
+        typedef struct {
+            ManAccessType Man : ManBits;
+            ExpAccessType Exp : ExpBits - 1;
+            bool Sign : 1;
+        } _S;
+        typedef struct {
+            ManAccessType Man : ManBits;
+            const char Padding : DeadBits;
+            ExpAccessType Exp : ExpBits - 1;
+            bool Sign : 1;
+        } _SwD;
+        typedef struct {
+            ManAccessType Man : ManBits;
+            ExpAccessType Exp : ExpBits;
+        } _U;
+        typedef struct {
+            ManAccessType Man : ManBits;
+            const char Padding : DeadBits;
+            ExpAccessType Exp : ExpBits;
+        } _UwD;
 
-        static const StaticFloat<ExpBits, ManBits, true> Max {
-            .m_IEEE754.Sign = false,
-            .m_IEEE754.Exp = StaticFloat<ExpBits, ManBits, true>::ExpMax,
-            .m_IEEE754.Man = StaticFloat<ExpBits, ManBits, true>::ManMax
-        };
-        
-        static const StaticFloat<ExpBits, ManBits, true> Min {
-            .m_IEEE754.Sign = true,
-            .m_IEEE754.Exp = StaticFloat<ExpBits, ManBits, true>::ExpMax,
-            .m_IEEE754.Man = StaticFloat<ExpBits, ManBits, true>::ManMax 
-        };
-        
-        static const StaticFloat<ExpBits, ManBits, true> NegInf {
-            .m_IEEE754.Sign = true,
-            .m_IEEE754.Exp = StaticFloat<ExpBits, ManBits, true>::ExpMax,
-            .m_IEEE754.Man = 0
-        };
-        
-        static const StaticFloat<ExpBits, ManBits, true> NegZero {
-            .m_IEEE754.Sign = true,
-            .m_IEEE754.Exp = 0,
-            .m_IEEE754.Man = 0
-        };
+        public:
+        typedef typename std::conditional<Signed,
+            typename std::conditional<HasDeadBits, _SwD, _S>::type,
+            typename std::conditional<HasDeadBits, _UwD, _U>::type>::type BitManipType;
+            
+                    private:
+        // typedef struct _B : BitManipType {
+        //         bool Bit[TotalBytes * 8] : TotalBytes * 8;
+        // } BitBoolAccessType;
 
-        static const StaticFloat<ExpBits, ManBits, true> NegOne {
-            .m_IEEE754.Sign = true,
-            .m_IEEE754.Exp = (StaticFloat<ExpBits, ManBits, true>::ExpMax >> 1),
-            .m_IEEE754.Man = 0
+        public:
+        union {
+            unsigned char m_data[TotalBytes];
+            BitManipType m_IEEE754;
+            // BitBoolAccessType m_bitBool;
         };
         
-        static const StaticFloat<ExpBits, ManBits, Signed> Lowest {
-            .m_IEEE754.Exp = 0,
-            .m_IEEE754.Man = 1
-        };
+        explicit StaticFloat(BitManipType&& IEEE754) : m_IEEE754(IEEE754) {}
+        
+        template<bool Signed_ = Signed>
+        static const StaticFloat<ExpBits, ManBits, Signed_> _PosInf;
+        template<>
+        inline static const StaticFloat<ExpBits, ManBits, true> _PosInf<true> {{
+            .Sign = false,
+            .Exp = StaticFloat<ExpBits, ManBits, true>::ExpMax,
+            .Man = 0
+        }};
+        template<>
+        inline static const StaticFloat<ExpBits, ManBits, false> _PosInf<false> {{
+            .Exp = StaticFloat<ExpBits, ManBits, false>::ExpMax,
+            .Man = 0
+        }};
+        inline static const auto& PosInf = _PosInf<Signed>;
+        
+        template<bool Signed_ = Signed>
+        inline static const StaticFloat<ExpBits, ManBits, Signed_> PosZero;
+        template<>
+        inline static const StaticFloat<ExpBits, ManBits, true> PosZero<true> {{
+            .Sign = false,
+            .Exp = 0,
+            .Man = 0
+        }};
+        template<>
+        inline static const StaticFloat<ExpBits, ManBits, false> PosZero<false> {{
+            .Exp = 0,
+            .Man = 0
+        }};
+        // inline static const auto& NegZero = _NegZero<Signed>;
+        
+        template<bool Signed_ = Signed>
+        static const StaticFloat<ExpBits, ManBits, Signed_> PosOne;
+        template<>
+        inline static const StaticFloat<ExpBits, ManBits, true> PosOne<true> {{
+            .Sign = false,
+            .Exp = StaticFloat<ExpBits, ManBits, true>::ExpMax >> 1,
+            .Man = 0
+        }};
+        template<>
+        inline static const StaticFloat<ExpBits, ManBits, false> PosOne<false> {{
+            .Exp = StaticFloat<ExpBits, ManBits, false>::ExpMax >> 1,
+            .Man = 0
+        }};
+        // inline static const auto& NegZero = _NegZero<Signed>;
+        
+        template<bool Signed_ = Signed>
+        static const StaticFloat<ExpBits, ManBits, Signed_> Max;
+        template<>
+        inline static const StaticFloat<ExpBits, ManBits, true> Max<true> {{
+            .Sign = false,
+            .Exp = StaticFloat<ExpBits, ManBits, true>::ExpMax,
+            .Man = StaticFloat<ExpBits, ManBits, true>::ManMax
+        }};
+        template<>
+        inline static const StaticFloat<ExpBits, ManBits, false> Max<false> {{
+            .Exp = StaticFloat<ExpBits, ManBits, false>::ExpMax,
+            .Man = StaticFloat<ExpBits, ManBits, false>::ManMax
+        }};
+        // inline static const auto& NegZero = _NegZero<Signed>;
+        
+        template<bool Signed_ = Signed>
+        static const StaticFloat<ExpBits, ManBits, Signed_> Min;
+        template<>
+        inline static const StaticFloat<ExpBits, ManBits, true> Min<true> {{
+            .Sign = true,
+            .Exp = StaticFloat<ExpBits, ManBits, true>::ExpMax,
+            .Man = StaticFloat<ExpBits, ManBits, true>::ManMax
+        }};
+        template<>
+        inline static const StaticFloat<ExpBits, ManBits, false> Min<false> {{
+            .Exp = 0,
+            .Man = 0
+        }};
+        // inline static const auto& NegZero = _NegZero<Signed>;
+        
+        template<bool Signed_ = Signed>
+        static const StaticFloat<ExpBits, ManBits, Signed_> NegInf;
+        template<>
+        inline static const StaticFloat<ExpBits, ManBits, true> NegInf<true> {{
+            .Sign = true,
+            .Exp = StaticFloat<ExpBits, ManBits, true>::ExpMax,
+            .Man = 0
+        }};
+        template<>
+        inline static const StaticFloat<ExpBits, ManBits, false> NegInf<false> {{
+            .Exp = 0,
+            .Man = 0
+        }}; 
+        // inline static const auto& NegZero = _NegZero<Signed>;
+        
+        template<bool Signed_ = Signed>
+        static const StaticFloat<ExpBits, ManBits, Signed_> _NegZero;
+        template<>
+        inline static const StaticFloat<ExpBits, ManBits, true> _NegZero<true> {{
+            .Sign = true,
+            .Exp = 0,
+            .Man = 0
+        }};
+        template<>
+        inline static const StaticFloat<ExpBits, ManBits, false> _NegZero<false> {{
+            .Exp = 0,
+            .Man = 0
+        }};
+        inline static const auto& NegZero = _NegZero<Signed>;
+        
+        template<bool Signed_ = Signed>
+        static const StaticFloat<ExpBits, ManBits, Signed_> _NegOne;
+        template<>
+        inline static const StaticFloat<ExpBits, ManBits, true> _NegOne<true> {{
+            .Sign = true,
+            .Exp = (StaticFloat<ExpBits, ManBits, true>::ExpMax >> 1),
+            .Man = 0
+        }};
+        template<>
+        inline static const StaticFloat<ExpBits, ManBits, false> _NegOne<false> {{
+            .Exp = 0,
+            .Man = 0
+        }};
+        inline static const auto& NegOne = _NegOne<Signed>;
+        
+        inline static const StaticFloat<ExpBits, ManBits, Signed> Lowest {{
+            .Exp = 0,
+            .Man = 1
+        }};
+        // inline static const auto& Lowest = _Lowest<Signed>;
 
-        static const StaticFloat<ExpBits, ManBits, Signed> qNaN {
-            .m_IEEE754.Exp = 0,
-            .m_IEEE754.Man = (StaticFloat<ExpBits, ManBits, Signed>::ManAccessType(1) << (ManBits - 1))
-        };
+        inline static const StaticFloat<ExpBits, ManBits, Signed> qNaN {{
+            .Exp = 0,
+            .Man = (typename StaticFloat<ExpBits, ManBits, Signed>::ManAccessType(1) << (ManBits - 1))
+        }};
         
-        static const StaticFloat<ExpBits, ManBits, Signed> sNaN {
-            .m_IEEE754.Exp = 0,
-            .m_IEEE754.Man = (StaticFloat<ExpBits, ManBits, true>::ManMax >> 1)
-        };
-        
-        static const StaticFloat<ExpBits, ManBits, false> PosInf { StaticFloat<ExpBits, ManBits, true>::NegInf };
-        static const StaticFloat<ExpBits, ManBits, false> PosZero { StaticFloat<ExpBits, ManBits, true>::PosZero };
-        static const StaticFloat<ExpBits, ManBits, false> PosOne { StaticFloat<ExpBits, ManBits, true>::PosOne };
-        static const StaticFloat<ExpBits, ManBits, false> Max { StaticFloat<ExpBits, ManBits, true>::Min };
-        static const StaticFloat<ExpBits, ManBits, false> Min { StaticFloat<ExpBits, ManBits, true>::PosZero };
-        static const StaticFloat<ExpBits, ManBits, false> NegInf { StaticFloat<ExpBits, ManBits, true>::PosZero };
-        static const StaticFloat<ExpBits, ManBits, false> NegZero { StaticFloat<ExpBits, ManBits, true>::PosZero };
-        static const StaticFloat<ExpBits, ManBits, false> NegOne { StaticFloat<ExpBits, ManBits, true>::PosZero };
+        inline static const StaticFloat<ExpBits, ManBits, Signed> sNaN {{
+            .Exp = 0,
+            .Man = (StaticFloat<ExpBits, ManBits, Signed>::ManMax >> 1)
+        }};
 
         StaticFloat(int other = 0) : m_data() {
             if(other == 0) return;
             assign(other);
         }
 
-        std::string&& RawBits() {
+        std::string RawBits() {
             std::string rtn;
-            for(unsigned char* a = this->m_data + TotalBytes - 1; a >= this->m_data; a--) { //const unsigned char& c : this->m_data) {
-                for(signed short b = 8; b >= 0; rtn.push_back(CHKBITINBYTE(a, b-=1) ? '1' : '0'));
+            for(unsigned char* a = (this->m_data + TotalBytes - 1); a >= this->m_data; a--) { //const unsigned char& c : this->m_data) {
+                for(unsigned char b = 8; b > 0; b--) {
+                    rtn.push_back(CHKBITINBYTE(a, b - 1) ? '1' : '0');
+                }
             }
-            return std::move(rtn);
+            return rtn;
         }
         
         operator std::string() {
@@ -239,6 +348,8 @@ namespace FPNBits {
             if constexpr(Signed) rtn.m_data[0] &= ~(char(1) << 7);
             return std::move(rtn);
         }
+        
+        static constexpr bool isSigned() { return Signed; };
         
         template<short ExpBitsO, short ManBitsO, bool SignedO>
         StaticFloat<ExpBits, ManBits, Signed>(StaticFloat<ExpBitsO, ManBitsO, SignedO>&& other) {
@@ -281,45 +392,6 @@ namespace FPNBits {
             }
             return *this;
         }
-        
-        private:
-        typedef struct {
-            ManAccessType Man : ManBits;
-            ExpAccessType Exp : ExpBits - 1;
-            bool Sign : 1;
-        } _S;
-        typedef struct SwD_ : ChrAry<TotalBytes> {
-            ManAccessType Man : ManBits;
-            const char Padding : DeadBits;
-            ExpAccessType Exp : ExpBits - 1;
-            bool Sign : 1;
-        } _SwD;
-        typedef struct {
-            ManAccessType Man : ManBits;
-            ExpAccessType Exp : ExpBits;
-        } _U;
-        typedef struct _UwD_ : ChrAry<TotalBytes> {
-            ManAccessType Man : ManBits;
-            const char Padding : DeadBits;
-            ExpAccessType Exp : ExpBits;
-        } _UwD;
-
-        public:
-        typedef typename std::conditional<Signed,
-            typename std::conditional<HasDeadBits, _SwD, _S>::type,
-            typename std::conditional<HasDeadBits, _UwD, _U>::type>::type BitManipType;
-
-        private:
-        // typedef struct _B : BitManipType {
-        //         bool Bit[TotalBytes * 8] : TotalBytes * 8;
-        // } BitBoolAccessType;
-
-        public:
-        union {
-            unsigned char m_data[TotalBytes];
-            BitManipType m_IEEE754;
-            // BitBoolAccessType m_bitBool;
-        };
     };
 }
 
@@ -342,5 +414,9 @@ typedef float64_s float64;
 typedef FPNBits::StaticFloat<16, 112, false> float128_u;
 typedef FPNBits::StaticFloat<16, 112, true> float128_s;
 typedef float128_s float128;
+
+typedef FPNBits::StaticFloat<128, 128, false> float128_max_u;
+typedef FPNBits::StaticFloat<128, 128, true> float128_max_s;
+typedef float128_max_s float128_max;
 
 #endif
