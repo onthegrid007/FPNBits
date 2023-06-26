@@ -5,20 +5,7 @@
 #include <atomic>
 #include <functional>
 
-template<typename T>
-inline constexpr T PowerUpVal(const T v1, const T v2) {
-    return v1 * v2;
-}
-
-template<typename T, short N, T... Vals>
-inline constexpr typename std::enable_if<(N == sizeof...(Vals)), std::array<T, N>>::type MakePowerUpArr() {
-    return std::array<T, N>{{Vals...}};
-}
-
-template<typename T, short N, T... Vals>
-inline constexpr typename std::enable_if<(N != sizeof...(Vals)), std::array<T, N>>::type MakePowerUpArr() {
-    return MakePowerUpArr<T, N, Vals..., PowerUpVal(*(std::end({Vals...})), *(std::end({Vals...})))>();
-}
+#include "vendor/DynamicDLL/vendor/FileUtilities/vendor/STDExtras/STDExtras.hpp"
 
 namespace FPNBits {
     #define DEADBITS(bits__) ((((bits__) % 8) > 0) ? (8 - ((bits__) % 8)) : 0)
@@ -39,11 +26,11 @@ namespace FPNBits {
         public:
         typedef StaticFloat<_ExpBits, _ManBits, _Signed> Type;
         typedef StaticFloat<_ExpBits, _ManBits, !_Signed> InvtType;
-        typedef __int128 MaxAccessType;
+        typedef unsigned __int128 MaxAccessType;
         static constexpr char MinSupportedManAccessBits = 4;
-        static constexpr short MaxSupportedManAccessBits = (sizeof(MaxAccessType) * 8);
+        static constexpr short MaxSupportedManAccessBits = (sizeof(MaxAccessType) * 8) - _ExpBits;
         static constexpr char MinSupportedExpAccessBits = 4;
-        static constexpr short MaxSupportedExpAccessBits = MaxSupportedManAccessBits - (_Signed ? 1 : 0);
+        static constexpr short MaxSupportedExpAccessBits = (sizeof(MaxAccessType) * 8) - _ManBits;
         static constexpr char DeadBits = DEADBITS(_ExpBits + _ManBits);
         static constexpr bool HasDeadBits = (DeadBits > 0);
         static constexpr bool ExpBitsInRange = ((_ExpBits >= MinSupportedExpAccessBits) && ((_ExpBits - (_Signed ? 1 : 0)) <= MaxSupportedExpAccessBits));
@@ -51,22 +38,10 @@ namespace FPNBits {
         static constexpr typename std::enable_if<ExpBitsInRange && ManBitsInRange, short>::type TotalBytes = (RNDBITS(_ExpBits + _ManBits) / 8);
         // static std::atomic<short> DigitPlaces;
         
-        private:
-        static constexpr bool E8 = (RNDBITS(_ExpBits) / 8) <= 1;
-        static constexpr bool E16 = (RNDBITS(_ExpBits) / 8) <= 2;
-        static constexpr bool E32 = (RNDBITS(_ExpBits) / 8) <= 4;
-        static constexpr bool E64 = (RNDBITS(_ExpBits) / 8) <= 8;
-        static constexpr bool E128 = (RNDBITS(_ExpBits) / 8) <= 16;
-        static constexpr bool M8 = (RNDBITS(_ManBits) / 8) <= 1;
-        static constexpr bool M16 = (RNDBITS(_ManBits) / 8) <= 2;
-        static constexpr bool M32 = (RNDBITS(_ManBits) / 8) <= 4;
-        static constexpr bool M64 = (RNDBITS(_ManBits) / 8) <= 8;
-        static constexpr bool M128 = (RNDBITS(_ManBits) / 8) <= 16;
-        
         // template<typename T>
         // constexpr void assign(T other) {
         //     if constexpr(_Signed) {
-        //         if((m_IEEE754.Sign = (other < 0))) other = -other;
+        //         if((Sign = (other < 0))) other = -other;
         //     }
         //     else {
         //         if(other < 0) return;
@@ -84,40 +59,89 @@ namespace FPNBits {
         //         bitIdx--;
         //     }
             
-        //     m_IEEE754.Exp = (bitIdx + (Type::ExpMax >> 1));
-        //     m_IEEE754.Man = (other & ~(typename Type::ManAccessType(1) << _ManBits));
+        //     Exp = (bitIdx + (Type::ExpMax >> 1));
+        //     Man = (other & ~(typename Type::ManAccessType(1) << _ManBits));
         // }
         
         public:
-        typedef typename std::enable_if<E128,
-                    typename std::conditional<E8, unsigned char, 
-                        typename std::conditional<E16, unsigned short,
-                            typename std::conditional<E32, unsigned int,
-                                typename std::conditional<E64, unsigned long int, unsigned __int128>::type>::type>::type>::type>::type ExpAccessType;
+        typedef typename std::enable_if<((RNDBITS(_ExpBits) / BYTE) <= sizeof(MaxAccessType)),
+                    typename std::conditional<((RNDBITS(_ExpBits) / BYTE) <= sizeof(unsigned char)), unsigned char, 
+                        typename std::conditional<((RNDBITS(_ExpBits) / BYTE) <= sizeof(unsigned short)), unsigned short, 
+                            typename std::conditional<((RNDBITS(_ExpBits) / BYTE) <= sizeof(unsigned int)), unsigned int, 
+                                typename std::conditional<((RNDBITS(_ExpBits) / BYTE) <= sizeof(unsigned long int)), unsigned long int, MaxAccessType>::type>::type>::type>::type>::type ExpAccessType;
 
-        typedef typename std::enable_if<M128, 
-                    typename std::conditional<M8, unsigned char, 
-                        typename std::conditional<M16, unsigned short,
-                            typename std::conditional<M32, unsigned int,
-                                typename std::conditional<M64, unsigned long int, unsigned __int128>::type>::type>::type>::type>::type ManAccessType;
-        
+        typedef typename std::enable_if<((RNDBITS(_ManBits) / BYTE) <= sizeof(MaxAccessType)),
+                    typename std::conditional<((RNDBITS(_ManBits) / BYTE) <= sizeof(unsigned char)), unsigned char, 
+                        typename std::conditional<((RNDBITS(_ManBits) / BYTE) <= sizeof(unsigned short)), unsigned short, 
+                            typename std::conditional<((RNDBITS(_ManBits) / BYTE) <= sizeof(unsigned int)), unsigned int, 
+                                typename std::conditional<((RNDBITS(_ManBits) / BYTE) <= sizeof(unsigned long int)), unsigned long int, MaxAccessType>::type>::type>::type>::type>::type ManAccessType;
+
         static constexpr typename Type::ExpAccessType ExpBias = ((typename Type::ExpAccessType(1) << (_ExpBits - (_Signed ? 2 : 1))) - 1);
         static constexpr typename Type::ExpAccessType ExpMax = ((ExpBias << 1) + 1);
         static constexpr typename Type::ManAccessType ManBias = ((typename Type::ManAccessType(1) << (_ManBits - 1)) - 1);
         static constexpr typename Type::ManAccessType ManMax = ((ManBias << 1) + 1);
         
         public:
+        static constexpr bool isLittleEndian{
+            true//std::isLittleEndianS;
+        };
+        
+    //     static constexpr short ExpBits{_ExpBits};
+    //     static constexpr short ManBits{_ManBits};
+    // 	static constexpr bool Signed{_Signed};
+    	
+    // 	// typename std::enable_if<true, ManAccessType>::type  : _ManBits;
+	// ManAccessType Man : (isLittleEndian() ? _ManBits : 0);
+    // template<typename T = typename std::enable_if<HasDeadBits, char>::type>
+	// T Padding : DEADBITS(_ExpBits + _ManBits);
+    // ExpAccessType Exp : (isLittleEndian() ? (_Signed ? _ExpBits - 1 : _ExpBits) : 0);
+	// // typename std::enable_if<(_Signed && true), ExpAccessType>::type Exp : _ExpBits - 1;
+    // template<typename T = typename std::enable_if<(isLittleEndian() && _Signed), bool>::type>
+    // T Sign : 1;
+	
+	// template<typename T = typename std::conditional<(isLittleEndian() && _Signed && !HasDeadBits), void, bool>::type> requires(std::is_void_v<T>)
+    // 	constexpr StaticFloat() : Man(0), Exp(0), Sign(false) {}
+	// template<> requires (_Signed && !HasDeadBits && true)
+    // constexpr StaticFloat(const bool& _Neg, const ExpAccessType& _Exp, const ManAccessType& _Man) : Man(_Man), Exp(_Exp), Sign(_Neg) {}
+	
+	// template<> requires (_Signed && HasDeadBits && true)
+	// constexpr StaticFloat() : Man(0), Padding(0), Exp(0), Sign(false) {}
+	// template<> requires (_Signed && HasDeadBits && true)
+    // 	constexpr StaticFloat(const bool& _Neg, const ExpAccessType& _Exp, const ManAccessType& _Man) : Man(_Man), Padding(0), Exp(_Exp), Sign(_Neg) {}
+	
+	// template<> requires (!_Signed && HasDeadBits && true)
+	// constexpr StaticFloat() : Man(0), Padding(0), Exp(0) {}
+	// template<> requires (!_Signed && HasDeadBits && true)
+    // 	constexpr StaticFloat(const bool& _Neg, const ExpAccessType& _Exp, const ManAccessType& _Man) : Man(_Man), Padding(0), Exp(_Exp) {}
+	
+	// template<> requires (!_Signed && !HasDeadBits && true)
+	// constexpr StaticFloat() : Man(0), Exp(0) {}
+	// template<> requires (!_Signed && !HasDeadBits && true)
+    // 	constexpr StaticFloat(const bool& _Neg, const ExpAccessType& _Exp, const ManAccessType& _Man) : Man(_Man), Exp(_Exp) {}
+	
+	
+            
         typedef struct __S {
-            constexpr __S(const bool _Neg = false, const ExpAccessType _Exp = 0, const ManAccessType _Man = 0) : Man(_Man), Exp(_Exp), Sign(_Neg) {}
+            constexpr __S() : Man(0), Exp(0), Sign(false) {}
+            constexpr __S(const bool& _Neg, const ExpAccessType& _Exp, const ManAccessType& _Man) : Man(_Man), Exp(_Exp), Sign(_Neg) {}
+            // constexpr ~__S() = default;
+            // __S(const bool _Neg = false, const ExpAccessType _Exp = 0, const ManAccessType _Man = 0) : Man(_Man), Exp(_Exp), Sign(_Neg) {}
             ManAccessType Man : _ManBits;
             ExpAccessType Exp : _ExpBits - 1;
             bool Sign : 1;
             static constexpr short ExpBits{_ExpBits};
             static constexpr short ManBits{_ManBits};
             static constexpr bool Signed{true};
+            constexpr __S operator*(const __S& other) { return StaticFloat<_ExpBits, _ManBits, true>(*this) * StaticFloat<_ExpBits, _ManBits, true>(other); }
+            constexpr __S operator/(const __S& other) { return StaticFloat<_ExpBits, _ManBits, true>(*this) / StaticFloat<_ExpBits, _ManBits, true>(other); }
+            constexpr __S operator+(const __S& other) { return StaticFloat<_ExpBits, _ManBits, true>(*this) + StaticFloat<_ExpBits, _ManBits, true>(other); }
+            constexpr __S operator-(const __S& other) { return StaticFloat<_ExpBits, _ManBits, true>(*this) - StaticFloat<_ExpBits, _ManBits, true>(other); }
         } _S;
         typedef struct __SwP {
-            constexpr __SwP(const bool _Neg, const ExpAccessType _Exp, const ManAccessType _Man) : Man(_Man), Padding(0), Exp(_Exp), Sign(_Neg) {}
+            constexpr __SwP() : Man(0), Padding(0), Exp(0), Sign(false) {}
+            constexpr __SwP(const bool& _Neg, const ExpAccessType& _Exp, const ManAccessType& _Man) : Man(_Man), Padding(0), Exp(_Exp), Sign(_Neg) {}
+            // constexpr ~__SwP() = default;
+            // __SwP(const bool _Neg = false, const ExpAccessType _Exp = 0, const ManAccessType _Man = 0) : Man(_Man), Padding(0), Exp(_Exp), Sign(_Neg) {}
             ManAccessType Man : _ManBits;
             const char Padding : DeadBits;
             ExpAccessType Exp : _ExpBits - 1;
@@ -125,40 +149,60 @@ namespace FPNBits {
             static constexpr short ExpBits{_ExpBits};
             static constexpr short ManBits{_ManBits};
             static constexpr bool Signed{true};
+            constexpr __SwP operator*(const __SwP& other) { return StaticFloat<_ExpBits, _ManBits, true>(*this) * StaticFloat<_ExpBits, _ManBits, true>(other); }
+            constexpr __SwP operator/(const __SwP& other) { return StaticFloat<_ExpBits, _ManBits, true>(*this) / StaticFloat<_ExpBits, _ManBits, true>(other); }
+            constexpr __SwP operator+(const __SwP& other) { return StaticFloat<_ExpBits, _ManBits, true>(*this) + StaticFloat<_ExpBits, _ManBits, true>(other); }
+            constexpr __SwP operator-(const __SwP& other) { return StaticFloat<_ExpBits, _ManBits, true>(*this) - StaticFloat<_ExpBits, _ManBits, true>(other); }
         } _SwP;
         typedef struct __U {
-            constexpr __U(const ExpAccessType _Exp, const ManAccessType _Man) : Man(_Man), Exp(_Exp) {}
+            constexpr __U() : Man(0), Exp(0) {}
+            constexpr __U(const ExpAccessType& _Exp, const ManAccessType& _Man) : Man(_Man), Exp(_Exp) {}
+            // constexpr ~__U() = default;
+            // __U(const ExpAccessType _Exp = 0, const ManAccessType _Man = 0) : Man(_Man), Exp(_Exp) {}
             ManAccessType Man : _ManBits;
             ExpAccessType Exp : _ExpBits;
             static constexpr short ExpBits{_ExpBits};
             static constexpr short ManBits{_ManBits};
             static constexpr bool Signed{false};
+            constexpr __U operator*(const __U& other) const { return StaticFloat<_ExpBits, _ManBits, false>(*this) * StaticFloat<_ExpBits, _ManBits, false>(other); }
+            constexpr __U operator/(const __U& other) { return StaticFloat<_ExpBits, _ManBits, false>(*this) / StaticFloat<_ExpBits, _ManBits, false>(other); }
+            constexpr __U operator+(const __U& other) { return StaticFloat<_ExpBits, _ManBits, false>(*this) + StaticFloat<_ExpBits, _ManBits, false>(other); }
+            constexpr __U operator-(const __U& other) { return StaticFloat<_ExpBits, _ManBits, false>(*this) - StaticFloat<_ExpBits, _ManBits, false>(other); }
         } _U;
         typedef struct __UwP{
-            constexpr __UwP(const ExpAccessType _Exp, const ManAccessType _Man) : Man(_Man), Padding(0), Exp(_Exp) {}
+            constexpr __UwP() : Man(0), Padding(0), Exp(0) {}
+            constexpr __UwP(const ExpAccessType& _Exp, const ManAccessType& _Man) : Man(_Man), Padding(0), Exp(_Exp) {}
+            // constexpr ~__UwP() = default;
+            // __UwP(const ExpAccessType _Exp = 0, const ManAccessType _Man = 0) : Man(_Man), Padding(0), Exp(_Exp) {}
             ManAccessType Man : _ManBits;
             const char Padding : DeadBits;
             ExpAccessType Exp : _ExpBits;
             static constexpr short ExpBits{_ExpBits};
             static constexpr short ManBits{_ManBits};
             static constexpr bool Signed{false};
+            constexpr __UwP operator*(const __UwP& other) { return StaticFloat<_ExpBits, _ManBits, false>(*this) * StaticFloat<_ExpBits, _ManBits, false>(other); }
+            constexpr __UwP operator/(const __UwP& other) { return StaticFloat<_ExpBits, _ManBits, false>(*this) / StaticFloat<_ExpBits, _ManBits, false>(other); }
+            constexpr __UwP operator+(const __UwP& other) { return StaticFloat<_ExpBits, _ManBits, false>(*this) + StaticFloat<_ExpBits, _ManBits, false>(other); }
+            constexpr __UwP operator-(const __UwP& other) { return StaticFloat<_ExpBits, _ManBits, false>(*this) - StaticFloat<_ExpBits, _ManBits, false>(other); }
         } _UwP;
         
+        //  isLittleEndian
         typedef typename std::conditional<_Signed,
+                //typename std::conditional<std::isLittleEndian,
             typename std::conditional<HasDeadBits, _SwP, _S>::type,
             typename std::conditional<HasDeadBits, _UwP, _U>::type>::type BitManipType;
         
         // private:
-        // typedef struct _B : BitManipType {
+        // typedef struct _B : Type {
         //         bool Bit[TotalBytes * 8] : TotalBytes * 8;
         // } BitBoolAccessType;
         
         public:
-        union {
-            unsigned char m_data[TotalBytes];
+        // union {
+        //     unsigned char m_data[TotalBytes];
             BitManipType m_IEEE754;
             // BitBoolAccessType m_bitBool;
-        };
+        // };
         
         friend std::string __Internal::to_str<Type>(const Type&, unsigned short);
         
@@ -166,75 +210,75 @@ namespace FPNBits {
         
         constexpr operator const InvtType() const {
             InvtType rtn;
-            rtn.m_data = this->m_data;
-            if constexpr(_Signed) rtn.m_data[0] &= ~(char(1) << 7);
+            // rtn.m_data = this->m_data;
+            // fix me...
+            // if constexpr(_Signed) rtn.m_data[0] &= ~(char(1) << 7);
             return rtn;
         }
         
-        constexpr StaticFloat(const Type::BitManipType other) : m_IEEE754(other) {}        
+        // constexpr StaticFloat(const Type& other) : m_IEEE754(other) {}        
         
-        constexpr StaticFloat(const int& other) : m_data() {
-            if(other ==  0) return;
-            ManAccessType o;
-            if constexpr(_Signed) {
-                o = ((m_IEEE754.Sign = (other < 0)) ? -other : other);
-            }
-            else {
-                if(other < 0) return;
-                o = other;
-            }
-            short bitIdx = ((TotalBytes * 8) - 1);
-            while(bitIdx > 0) {
-                if(o & (ManAccessType(1) << bitIdx)) {
-                    if(bitIdx >= _ManBits) {
-                        o >>= (bitIdx - _ManBits);
-                    } else {
-                        o <<= (_ManBits - bitIdx);
-                    }
-                    break;
-                }
-                bitIdx--;
-            }
-            // if constexpr(_Signed) {
-            //     this->StaticFloat({(other < 0), (bitIdx + (ExpMax >> 1)), (o & ~(ManAccessType(1) << (_ManBits - 1)))});
-            // }
-            // else {
-            //     *this = StaticFloat({(bitIdx + (ExpMax >> 1)), (o & ~(ManAccessType(1) << (_ManBits - 1)))});
-            // }
-            // if constexpr(_Signed) m_IEEE754.Sign = (other < 0);
-            m_IEEE754.Exp = (bitIdx + ExpBias);
-            m_IEEE754.Man = (o & ~ManBias);
-            // assign(other);
-        }
+        // constexpr StaticFloat(const int& other) : m_IEEE754() {
+        //     if(other ==  0) return;
+        //     ManAccessType o;
+        //     if constexpr(_Signed) {
+        //         o = ((Sign = (other < 0)) ? -other : other);
+        //     }
+        //     else {
+        //         if(other < 0) return;
+        //         o = other;
+        //     }
+        //     short bitIdx = ((TotalBytes * 8) - 1);
+        //     while(bitIdx > 0) {
+        //         if(o & (ManAccessType(1) << bitIdx)) {
+        //             if(bitIdx >= _ManBits) {
+        //                 o >>= (bitIdx - _ManBits);
+        //             } else {
+        //                 o <<= (_ManBits - bitIdx);
+        //             }
+        //             break;
+        //         }
+        //         bitIdx--;
+        //     }
+        //     // if constexpr(_Signed) {
+        //     //     this->StaticFloat({(other < 0), (bitIdx + (ExpMax >> 1)), (o & ~(ManAccessType(1) << (_ManBits - 1)))});
+        //     // }
+        //     // else {
+        //     //     *this = StaticFloat({(bitIdx + (ExpMax >> 1)), (o & ~(ManAccessType(1) << (_ManBits - 1)))});
+        //     // }
+        //     // if constexpr(_Signed) Sign = (other < 0);
+        //     Exp = (bitIdx + ExpBias);
+        //     Man = (o & ~ManBias);
+        //     // assign(other);
+        // }
         
-        template<short ExpBitsO, short ManBitsO, bool SignedO>
-        constexpr StaticFloat(const StaticFloat<ExpBitsO, ManBitsO, SignedO>& other) : m_data() {
-            constexpr bool IsSameSign = (_Signed == SignedO);
-            constexpr bool IsExact = ((_ExpBits == ExpBitsO) && (_ManBits == ManBitsO));
-            if((other.m_IEEE754.Exp == 0) && (other.m_IEEE754.Man == 0)) {
-                if constexpr(_Signed && IsSameSign) m_IEEE754 = ((m_IEEE754.Sign ^ other.m_IEEE754.Sign) ? NegZero : PosZero);
-                m_IEEE754 = PosZero;
-                // return *this;
-            }
-            if constexpr(IsExact && IsSameSign) {
-                m_IEEE754 = other.m_IEEE754;
-            }
-            else if constexpr(IsExact && !IsSameSign) {
-                constexpr StaticFloat<ExpBitsO, ManBitsO, !SignedO> O{other};
-                m_IEEE754 = O.m_IEEE754;
-            }
-            else if constexpr(!IsExact && IsSameSign) {
-                if constexpr(_Signed) m_IEEE754.Sign = other.m_IEEE754.Sign;
-                m_IEEE754.Exp = (Type::ExpBias + other.m_IEEE754.Exp - StaticFloat<ExpBitsO, ManBitsO, SignedO>::ExpBias);
-                m_IEEE754.Man = other.m_IEEE754.Man;
-            }
-            else if constexpr(!IsExact && !IsSameSign) {
-                constexpr StaticFloat<ExpBitsO, ManBitsO, !SignedO> O{other};
-                if constexpr(_Signed) m_IEEE754.Sign = O.m_IEEE754.Sign;
-                m_IEEE754.Exp = (Type::ExpBias + O.m_IEEE754.Exp - StaticFloat<ExpBitsO, ManBitsO, !SignedO>::ExpBias);
-                m_IEEE754.Man = O.m_IEEE754.Man;
-            }
-        }
+        // template<short ExpBitsO, short ManBitsO, bool SignedO>
+        // constexpr StaticFloat(const StaticFloat<ExpBitsO, ManBitsO, SignedO>& other) : m_IEEE754() {
+        //     constexpr bool IsSameSign = (_Signed == SignedO);
+        //     constexpr bool IsExact = ((_ExpBits == ExpBitsO) && (_ManBits == ManBitsO));
+        //     if((other.Exp == 0) && (other.Man == 0)) {
+        //         if constexpr(_Signed && IsSameSign) m_IEEE754 = ((Sign ^ other.Sign) ? NegZero : PosZero);
+        //         *this = PosZero;
+        //         // return *this;
+        //     }
+        //     if constexpr(IsExact && IsSameSign) {
+        //         *this = other;
+        //     }
+        //     else if constexpr(IsExact && !IsSameSign) {
+        //         *this = StaticFloat<ExpBitsO, ManBitsO, !SignedO>(other);
+        //     }
+        //     else if constexpr(!IsExact && IsSameSign) {
+        //         if constexpr(_Signed) Sign = other.Sign;
+        //         Exp = (Type::ExpBias + other.Exp - StaticFloat<ExpBitsO, ManBitsO, SignedO>::ExpBias);
+        //         Man = other.Man;
+        //     }
+        //     else if constexpr(!IsExact && !IsSameSign) {
+        //         constexpr StaticFloat<ExpBitsO, ManBitsO, !SignedO> O{other};
+        //         if constexpr(_Signed) Sign = O.Sign;
+        //         Exp = (Type::ExpBias + O.Exp - StaticFloat<ExpBitsO, ManBitsO, !SignedO>::ExpBias);
+        //         Man = O.Man;
+        //     }
+        // }
         
         // template<typename T>
         // constexpr void operator=(const int other) const {
@@ -260,40 +304,40 @@ namespace FPNBits {
         //         bitIdx--;
         //     }
             
-        //     if constexpr(_Signed) m_IEEE754.Sign = (other < 0);
-        //     m_IEEE754.Exp = (bitIdx + (ExpMax >> 1));
-        //     m_IEEE754.Man = (o & ~(ManAccessType(1) << (_ManBits - 1)));
+        //     if constexpr(_Signed) Sign = (other < 0);
+        //     Exp = (bitIdx + (ExpMax >> 1));
+        //     Man = (o & ~(ManAccessType(1) << (_ManBits - 1)));
         // }
         
-        template<typename T>
-        constexpr Type& operator=(const T other) {
-            constexpr bool IsSameSign = (_Signed == T::Signed);
-            constexpr bool IsExact = ((_ExpBits == T::ExpBits) && (_ManBits == T::ManBits));
-            if((other.Exp == 0) && (other.Man == 0)) {
-                if constexpr(_Signed && IsSameSign) m_IEEE754 = ((m_IEEE754.Sign ^ other.Sign) ? NegZero : PosZero);
-                m_IEEE754 = PosZero;
-                return *this;
-            }
-            if constexpr(IsExact && IsSameSign) {
-                m_IEEE754 = other.m_IEEE754;
-            }
-            else if constexpr(IsExact && !IsSameSign) {
-                constexpr StaticFloat<T::ExpBits, T::ManBits, !T::Signed> O{other};
-                m_IEEE754 = O.m_IEEE754;
-            }
-            else if constexpr(!IsExact && IsSameSign) {
-                if constexpr(_Signed) m_IEEE754.Sign = other.Sign;
-                m_IEEE754.Exp = (Type::ExpBias + other.Exp - StaticFloat<T::ExpBits, T::ManBits, T::Signed>::ExpBias);
-                m_IEEE754.Man = other.Man;
-            }
-            else if constexpr(!IsExact && !IsSameSign) {
-                constexpr StaticFloat<T::ExpBits, T::ManBits, !T::Signed> O{other};
-                if constexpr(_Signed) m_IEEE754.Sign = O.m_IEEE754.Sign;
-                m_IEEE754.Exp = (Type::ExpBias + O.m_IEEE754.Exp - StaticFloat<T::ExpBits, T::ManBits, !T::Signed>::ExpBias);
-                m_IEEE754.Man = O.m_IEEE754.Man;
-            }
-            return *this;
-        }
+        // template<typename T>
+        // constexpr Type& operator=(const T& other) {
+        //     constexpr bool IsSameSign = (_Signed == T::Signed);
+        //     constexpr bool IsExact = ((_ExpBits == T::ExpBits) && (_ManBits == T::ManBits));
+        //     if((other.Exp == 0) && (other.Man == 0)) {
+        //         if constexpr(_Signed && IsSameSign) m_IEEE754 = ((Sign ^ other.Sign) ? NegZero : PosZero);
+        //         m_IEEE754 = PosZero;
+        //         return *this;
+        //     }
+        //     if constexpr(IsExact && IsSameSign) {
+        //         m_IEEE754 = other.m_IEEE754;
+        //     }
+        //     else if constexpr(IsExact && !IsSameSign) {
+        //         constexpr StaticFloat<T::ExpBits, T::ManBits, !T::Signed> O{other};
+        //         m_IEEE754 = O.m_IEEE754;
+        //     }
+        //     else if constexpr(!IsExact && IsSameSign) {
+        //         if constexpr(_Signed) Sign = other.Sign;
+        //         Exp = (Type::ExpBias + other.Exp - StaticFloat<T::ExpBits, T::ManBits, T::Signed>::ExpBias);
+        //         Man = other.Man;
+        //     }
+        //     else if constexpr(!IsExact && !IsSameSign) {
+        //         constexpr StaticFloat<T::ExpBits, T::ManBits, !T::Signed> O{other};
+        //         if constexpr(_Signed) Sign = O.Sign;
+        //         Exp = (Type::ExpBias + O.Exp - StaticFloat<T::ExpBits, T::ManBits, !T::Signed>::ExpBias);
+        //         Man = O.Man;
+        //     }
+        //     return *this;
+        // }
         
         template<short ExpBitsO, short ManBitsO, bool SignedO>
         constexpr Type operator*(const StaticFloat<ExpBitsO, ManBitsO, SignedO>& other) const {
@@ -303,21 +347,45 @@ namespace FPNBits {
                 return PosZero;
             }
             if constexpr(_Signed) {
-                return Type::BitManipType{
-                    static_cast<bool>(m_IEEE754.Sign ^ other.m_IEEE754.Sign),
-                    static_cast<ExpAccessType>(((m_IEEE754.Exp > 0) ? m_IEEE754.Exp : Type::ExpBias) + ((other.m_IEEE754.Exp > 0) ? (other.m_IEEE754.Exp - StaticFloat<ExpBitsO, ManBitsO, SignedO>::ExpBias) : ((m_IEEE754.Exp > 0) ? 0 : - Type::ExpBias))),
+                return Type{
+                    static_cast<bool>(m_IEEE754.Sign ^ other.Sign),
+                    static_cast<ExpAccessType>(
+                        (
+                            (m_IEEE754.Exp > 0) ? m_IEEE754.Exp : Type::ExpBias
+                        ) -
+                        (
+                            (other.Exp > 0) ? 
+                                -(other.m_IEEE754.Exp - StaticFloat<ExpBitsO, ManBitsO, SignedO>::ExpBias) : 
+                                (
+                                    (m_IEEE754.Exp > 0) ? static_cast<ExpAccessType>(0) : Type::ExpBias
+                                )
+                        )
+                    ),
                     static_cast<ManAccessType>(m_IEEE754.Man * other.m_IEEE754.Man)
                 };
             }
             else {
-                return Type::BitManipType{
-                    static_cast<ExpAccessType>(((m_IEEE754.Exp > 0) ? m_IEEE754.Exp : Type::ExpBias) + ((other.m_IEEE754.Exp > 0) ? (other.m_IEEE754.Exp - StaticFloat<ExpBitsO, ManBitsO, SignedO>::ExpBias) : ((m_IEEE754.Exp > 0) ? 0 : - Type::ExpBias))),
+                return Type{
+                    static_cast<ExpAccessType>(
+                        (
+                            (m_IEEE754.Exp > 0) ? m_IEEE754.Exp : Type::ExpBias
+                        ) -
+                        (
+                            (other.Exp > 0) ? 
+                                -(other.m_IEEE754.Exp - StaticFloat<ExpBitsO, ManBitsO, SignedO>::ExpBias) : 
+                                (
+                                    (m_IEEE754.Exp > 0) ? static_cast<ExpAccessType>(0) : Type::ExpBias
+                                )
+                        )
+                    ),
                     static_cast<ManAccessType>(m_IEEE754.Man * other.m_IEEE754.Man)
                 };
             }
         }
         
-        constexpr StaticFloat() : m_data() {}
+        // constexpr StaticFloat() : m_IEEE754() {}
+        // template<>
+        // constexpr StaticFloat() : m_IEEE754() {}
         
         // ~StaticFloat() = default;
         
@@ -326,7 +394,7 @@ namespace FPNBits {
         //     *this = (*((FPNBits::StaticFloat<9, 23, _Signed>*)(&other)));
         // }
         
-        inline static constexpr BitManipType PosInf{[]() constexpr->BitManipType{
+        inline static constexpr StaticFloat PosInf{[]() constexpr->StaticFloat{
             if constexpr(_Signed) {
                 return {
                     false,
@@ -336,13 +404,13 @@ namespace FPNBits {
             }
             else {
                 return {
-                    0,
+                    ExpMax,
                     0
                 };
             }
         }()};
         
-        inline static constexpr BitManipType PosZero{[]() constexpr->BitManipType{
+        inline static constexpr StaticFloat PosZero{[]() constexpr->StaticFloat{
             if constexpr(_Signed) {
                 return {
                     false,
@@ -358,55 +426,71 @@ namespace FPNBits {
             }
         }()};
         
-        inline static constexpr BitManipType Bias{[]() constexpr->BitManipType{
-            if constexpr(_Signed) {
-                return {
-                    false,
-                    (ExpAccessType(1) << (_ExpBits)),
-                    0
-                };
-            }
-            else {
-                return {
-                    (ExpAccessType(1) << (_ExpBits)),
-                    0
-                };
-            }
-        }()};
-        
-        inline static constexpr BitManipType PosTwo{[]() constexpr->BitManipType{
-            if constexpr(_Signed) {
-                return {
-                    false,
-                    (ExpBias + 1),
-                    0
-                };
-            }
-            else {
-                return {
-                    ((ExpAccessType(1) << (_ExpBits - 1)) + 1),
-                    0
-                };
-            }
-        }()};
-        
-        // inline static constexpr BitManipType PosTen{[]() constexpr->BitManipType{
+        // inline static constexpr Type Bias{[]() constexpr->Type{
         //     if constexpr(_Signed) {
         //         return {
         //             false,
-        //             ((ExpAccessType(1) << (_ExpBits - 1)) + 1),
-        //             5
+        //             (typename Type::ExpAccessType(1) << (_ExpBits)),
+        //             0
+        //         };
+        //     }
+        //     else {
+        //         return {
+        //             (typename Type::ExpAccessType(1) << (_ExpBits)),
+        //             0
+        //         };
+        //     }
+        // }()};
+        
+        // inline static constexpr Type PosTen{[]() constexpr->Type{
+        //     if constexpr(_Signed) {
+        //         return {
+        //             false,
+        //             (ExpAccessType(1) << (_ExpBits)),
+        //             0
+        //         };
+        //     }
+        //     else {
+        //         return {
+        //             (ExpAccessType(1) << (_ExpBits)),
+        //             0
+        //         };
+        //     }
+        // }()};
+        
+        // inline static constexpr Type PosTwo{[]() constexpr->Type{
+        //     if constexpr(_Signed) {
+        //         return {
+        //             false,
+        //             (ExpBias + 1),
+        //             0
         //         };
         //     }
         //     else {
         //         return {
         //             ((ExpAccessType(1) << (_ExpBits - 1)) + 1),
-        //             5
+        //             0
         //         };
         //     }
         // }()};
         
-        inline static constexpr BitManipType Max{[]() constexpr->BitManipType{
+        inline static constexpr StaticFloat Ten{[]() constexpr->StaticFloat{
+            if constexpr(_Signed) {
+                return {
+                    false,
+                    (ExpBias + 3),
+                    (typename Type::ManAccessType(1) << (_ManBits - 2))
+                };
+            }
+            else {
+                return {
+                    (ExpBias + 3),
+                    (typename Type::ManAccessType(1) << (_ManBits - 2))
+                };
+            }
+        }()};
+        
+        inline static constexpr StaticFloat Max{[]() constexpr->StaticFloat{
             if constexpr(_Signed) {
                 return {
                     false,
@@ -422,7 +506,7 @@ namespace FPNBits {
             }
         }()};
         
-        inline static constexpr BitManipType Min{[]() constexpr->BitManipType{
+        inline static constexpr StaticFloat Min{[]() constexpr->StaticFloat{
             if constexpr(_Signed) {
                 return {
                     true,
@@ -438,7 +522,7 @@ namespace FPNBits {
             }
         }()};
         
-        inline static constexpr BitManipType NegInf{[]() constexpr->BitManipType{
+        inline static constexpr StaticFloat NegInf{[]() constexpr->StaticFloat{
             if constexpr(_Signed) {
                 return {
                     true,
@@ -454,7 +538,7 @@ namespace FPNBits {
             }
         }()};
         
-        inline static constexpr BitManipType NegZero{[]() constexpr->BitManipType{
+        inline static constexpr StaticFloat NegZero{[]() constexpr->StaticFloat{
             if constexpr(_Signed) {
                 return {
                     true,
@@ -470,7 +554,7 @@ namespace FPNBits {
             }
         }()};
         
-        inline static constexpr BitManipType NegOne{[]() constexpr->BitManipType{
+        inline static constexpr StaticFloat NegOne{[]() constexpr->StaticFloat{
             if constexpr(_Signed) {
                 return {
                     true,
@@ -486,7 +570,7 @@ namespace FPNBits {
             }
         }()};
         
-        inline static constexpr BitManipType Lowest{[]() constexpr->BitManipType{
+        inline static constexpr StaticFloat Lowest{[]() constexpr->StaticFloat{
             if constexpr(_Signed) {
                 return {
                     false,
@@ -502,7 +586,7 @@ namespace FPNBits {
             }
         }()};
         
-        inline static constexpr BitManipType qNaN{[]() constexpr->BitManipType{
+        inline static constexpr StaticFloat qNaN{[]() constexpr->StaticFloat{
             if constexpr(_Signed) {
                 return {
                     false,
@@ -518,7 +602,7 @@ namespace FPNBits {
             }
         }()};
         
-        inline static constexpr BitManipType sNaN{[]() constexpr->BitManipType{
+        inline static constexpr StaticFloat sNaN{[]() constexpr->StaticFloat{
             if constexpr(_Signed) {
                 return {
                     false,
@@ -536,6 +620,10 @@ namespace FPNBits {
         
         const std::string RawBits() const {
             std::string rtn;
+            // union {
+                // const Type& in{m_IEEE754};
+                const unsigned char* m_data{(unsigned char*)(this)};
+            // };
             for(unsigned char* a = (unsigned char*)(m_data + TotalBytes - 1); a >= m_data; a--) {
                 for(unsigned char b = 8; b > 0; b--) {
                     rtn.push_back(CHKBITINBYTE(a, b - 1) ? '1' : '0');
@@ -547,26 +635,28 @@ namespace FPNBits {
         operator const std::string() const {
             return __Internal::to_str(*this);
         }
-        
-        constexpr operator BitManipType() const {
-            return m_IEEE754;
-        }
     };
     
-    // #define MakeTenGTO(bit) []() constexpr->typename StaticFloat<128, 128, false>::BitManipType{ \
+    // #define MakeTenGTO(bit) []() constexpr->typename StaticFloat<128, 128, false>::Type{ \
     //     constexpr StaticFloat<128, 128, false>::const StaticFloat<const char> _B{bit}; \
     //     constexpr StaticFloat<128, 128, false>::const StaticFloat<const char> _T{10}; \
     //     return _B * _T; \
     // }()
     // #define MakeTenLTO(bit) (StaticFloat<128, 128, false>(1) / StaticFloat<128, 128, false>(1 << bit)).m_IEEE754
-    inline static constexpr auto tenGTO{std::MakePowerUpArr<typename StaticFloat<128, 128, false>::Type, 128, StaticFloat<128, 128, false>::PosTen>()};
+    // inline static constexpr auto Arri{std::GenCExprArr<StaticFloat<16, 112, false>, 128>([](const auto& arr) {
+    //     if constexpr(arr[0] == {0,0}) {
+    //         return StaticFloat<16, 112, false>::Ten;
+    //     }
+    //     return arr[idx - 1] * arr[idx - 1];
+    // })};// tenTO([](const typename StaticFloat<128, 128, false>::Type& V) constexpr->typename StaticFloat<128, 128, false>::Type{ return V * V; });
+    // inline static constexpr auto tenGTO{std::MakePowerUpArr<typename StaticFloat<128, 128, false>::Type, 128, StaticFloat<128, 128, false>::Ten>, StaticFloat<128, 128, false>::Ten>()};
         // 
     // };
-//         []() constexpr->typename StaticFloat<128, 128, false>::BitManipType{
+//         []() constexpr->typename StaticFloat<128, 128, false>::Type{
 //         constexpr int other = 1;
 //         constexpr StaticFloat<128, 128, false> _B = StaticFloat<128, 128, false>({0, 0});
 //         constexpr StaticFloat<128, 128, false> _T = StaticFloat<128, 128, false>{other};
-//         // return {(bitIdx + (StaticFloat<128, 128, false>::ExpMax >> 1)), (o & ~(typename StaticFloat<128, 128, false>::ManAccessType(1) << (StaticFloat<128, 128, false>::BitManipType::ManBits - 1)))};
+//         // return {(bitIdx + (StaticFloat<128, 128, false>::ExpMax >> 1)), (o & ~(typename StaticFloat<128, 128, false>::ManAccessType(1) << (StaticFloat<128, 128, false>::Type::ManBits - 1)))};
 //         return (StaticFloat<128, 128, false>(1) * StaticFloat<128, 128, false>(10));
 //     }()};
 
@@ -593,11 +683,11 @@ ManAccessType o;
                 bitIdx--;
             }
             
-            if constexpr(_Signed) m_IEEE754.Sign = (other < 0);
-            m_IEEE754.Exp = (bitIdx + (StaticFloat<128, 128, false>::ExpMax >> 1));
-            m_IEEE754.Man = (o & ~(typename StaticFloat<128, 128, false>::ManAccessType(1) << (StaticFloat<128, 128, false>::ManBits - 1)));
+            if constexpr(_Signed) Sign = (other < 0);
+            Exp = (bitIdx + (StaticFloat<128, 128, false>::ExpMax >> 1));
+            Man = (o & ~(typename StaticFloat<128, 128, false>::ManAccessType(1) << (StaticFloat<128, 128, false>::ManBits - 1)));
 */
-    // inline static constexpr StaticFloat<128, 128, false> o{[]() constexpr->typename StaticFloat<128, 128, false>::BitManipType{
+    // inline static constexpr StaticFloat<128, 128, false> o{[]() constexpr->typename StaticFloat<128, 128, false>::Type{
     //     return {
     //                 0,
     //                 0
@@ -626,7 +716,7 @@ ManAccessType o;
                 ComputeType TCount{0};
                 ComputeType Log10f;
                 // T MicroOffset{};
-                if constexpr(T::BitManipType::Signed) {
+                if constexpr(T::Type::Signed) {
                     const bool Neg{f < 0};
                     T Tmp{Neg ? T::NegHalf : T::PosHalf}; //0.5
                     if(Sign) {
@@ -743,8 +833,8 @@ typedef FPNBits::StaticFloat<16, 112, false> float128_u;
 typedef FPNBits::StaticFloat<16, 112, true> float128_s;
 typedef float128_s float128;
 
-typedef FPNBits::StaticFloat<128, 128, false> float128_max_u;
-typedef FPNBits::StaticFloat<128, 128, true> float128_max_s;
-typedef float128_max_s float128_max;
+// typedef FPNBits::StaticFloat<128, 128, false> float128_max_u;
+// typedef FPNBits::StaticFloat<128, 128, true> float128_max_s;
+// typedef float128_max_s float128_max;
 
 #endif
